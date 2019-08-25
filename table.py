@@ -31,6 +31,10 @@ def can_align(ps1, ps2, dy, dx):
     return np.array_equal(base_inter, annex_inter)
 
 class Table:
+
+    # deltas used in propagator (dy, dx)
+    deltas = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+
     def __init__(self, matrix, N_value = 3, loop_x = True, loop_y = True, symmetry_value = 8):
         self.N = N_value
         self.loop_y = loop_x
@@ -85,18 +89,17 @@ class Table:
             counter += 1
 
 
-        self.propagator = np.full( (2 * self.N - 1, 2 * self.N - 1, self.T), None)
+        self.propagator = np.full( (4, self.T), None)
 
-        for y in range(0, 2 * self.N - 1):
-            for x in range(0, 2 * self.N - 1):                                  
-                for t in range(0, self.T):
-                    a_list = []
-                    for t2 in range(0, self.T):
-                        if can_align(self.patterns[t], self.patterns[t2], y - self.N + 1, x - self.N + 1):
-                            a_list.append(t2)
-                    self.propagator[y][x][t] = [0 for _ in range(len(a_list))]
-                    for c in range(0, len(a_list)):
-                        self.propagator[y][x][t][c] = a_list[c]
+        for i, (dy, dx) in enumerate(self.deltas):                                
+            for t in range(0, self.T):
+                a_list = []
+                for t2 in range(0, self.T):
+                    if can_align(self.patterns[t], self.patterns[t2], dy, dx):
+                        a_list.append(t2)
+                self.propagator[i][t] = [0 for _ in range(len(a_list))]
+                for c in range(0, len(a_list)):
+                    self.propagator[i][t][c] = a_list[c]
 
 
     def pattern2Key(self, p):

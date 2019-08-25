@@ -126,50 +126,43 @@ class Field:
             for x1 in range(0, self.FMX):
                 if (self.changes[y1][x1]):
                     self.changes[y1][x1] = False
-                    dy = (0 - self.table.N) + 1
-                    while dy < self.table.N:
-                    #for dx in range(1 - self.N, self.N):
-                        dx = (0 - self.table.N) + 1
-                        while dx < self.table.N:
-                        #for dy in range(1 - self.N, self.N):
-                            y2 = y1 + dy
-                            if y2 < 0 and self.loop_y:
-                                y2 += self.FMY
-                            elif y2 >= self.FMY and self.loop_y:
-                                    y2 -= self.FMY
-                            else:
-                                pass
+                    for i, (dy, dx) in enumerate(self.table.deltas):
+                        y2 = y1 + dy
+                        if y2 < 0 and self.loop_y:
+                            y2 += self.FMY
+                        elif y2 >= self.FMY and self.loop_y:
+                                y2 -= self.FMY
+                        else:
+                            pass
 
-                            x2 = x1 + dx
-                            if x2 < 0 and self.loop_x:
-                                x2 += self.FMX
-                            elif x2 >= self.FMX and self.loop_x:
-                                    x2 -= self.FMX
-                            else:
+                        x2 = x1 + dx
+                        if x2 < 0 and self.loop_x:
+                            x2 += self.FMX
+                        elif x2 >= self.FMX and self.loop_x:
+                                x2 -= self.FMX
+                        else:
+                            pass
+                        
+                        w1 = self.wave[y1][x1]
+                        w2 = self.wave[y2][x2]
+                        
+                        p = self.table.propagator[i]
+                        
+                        for t2 in range(0, self.table.T):
+                            if (not w2[t2]):
                                 pass
-                            
-                            w1 = self.wave[y1][x1]
-                            w2 = self.wave[y2][x2]
-                            
-                            p = self.table.propagator[(self.table.N - 1) - dy][(self.table.N - 1) - dx]
-                            
-                            for t2 in range(0, self.table.T):
-                                if (not w2[t2]):
-                                    pass
-                                else:
-                                    b = False
-                                    prop = p[t2]
-                                    #print("Prop: {0}".format(prop))
-                                    i_one = 0
-                                    while (i_one < len(prop)) and (False == b):
-                                        b = w1[prop[i_one]]
-                                        i_one += 1                                    
-                                    if False == b:
-                                        self.changes[y2][x2] = True
-                                        change = True
-                                        w2[t2] = False
-                            dx += 1
-                        dy += 1
+                            else:
+                                b = False
+                                prop = p[t2]
+                                #print("Prop: {0}".format(prop))
+                                i_one = 0
+                                while (i_one < len(prop)) and (False == b):
+                                    b = w1[prop[i_one]]
+                                    i_one += 1                                    
+                                if False == b:
+                                    self.changes[y2][x2] = True
+                                    change = True
+                                    w2[t2] = False
                                   
         return change
 
@@ -232,3 +225,12 @@ def main(t, w=30, h=30):
     print(draw(f))
     print(val)
     return f
+
+import time
+def make_timer(func):
+    def _timer(*args, **kwargs):
+        t0 = time.time()
+        res = func(*args, **kwargs)
+        print(time.time() - t0)
+        return res
+    return _timer
