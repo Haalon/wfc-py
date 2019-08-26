@@ -7,14 +7,31 @@ import collections
 
 from table import Table
 
+
+
+dung = """\
+#####.###....  .####
+     .#######  .    
+......##....  ......
+#####.##....  .  ###
+  .............. #  
+  .#####....   . #  
+  .############.##  
+......   ######.....
+#####.   .......####
+#####........  .####\
+"""
+
+dung_test = np.array([list(s) for s in dung.split('\n')])
+
 test=np.array([
-    ['X',' ',' ',' ',' ','X',' '],
-    ['X','X','X','X','X','X',' '],
-    [' ',' ','X',' ',' ','X',' '],
-    [' ',' ','X',' ',' ','X',' '],
-    ['X','X','X',' ',' ','X','X'],
-    [' ',' ','X',' ',' ','X',' '],
-    ['X','X','X',' ',' ','X',' ']])
+    ['X',' ',' ',' ',' ',' ','X',' '],
+    ['X','X','X','X','X','X','X',' '],
+    [' ',' ','X',' ',' ',' ','X',' '],
+    [' ',' ','X',' ',' ',' ','X',' '],
+    ['X','X','X',' ',' ',' ','X','X'],
+    [' ',' ','X',' ',' ',' ','X',' '],
+    ['X','X','X',' ',' ',' ','X',' ']])
 
 class Field:
     def __init__(self, table, width, height, loop_x=True, loop_y=True, seed=None):
@@ -61,6 +78,8 @@ class Field:
         if seed != None:
             self.rng.seed(seed)
 
+        self.clear()
+
     def clear(self):
         for y in range(self.FMY):
             for x in range(self.FMX):
@@ -98,7 +117,56 @@ class Field:
         else:
             self.entropies[y][x] = -np.inf
 
-        
+    def run(self):
+        val = f.step()
+        while val == None:
+            val = f.step()
+        return val
+
+    def setEdges(self, val):
+        for x in range(self.width):
+            self.observeValue(0, x, val)
+            self.observeValue(self.height-1, x, val)
+
+
+        for y in range(1, self.height-1):
+            self.observeValue(y, 0, val)
+            self.observeValue(y, self.width-1, val)
+
+
+
+
+    def observeValue(self, y, x, val):
+        if not val in self.table.values_map:
+            raise Exception(f"Value {val} not found")
+
+        if y >= self.height or x >= self.width or y < 0 or x < 0:
+            raise Exception(f"Coordinates {y, x} are out of bounds")
+
+        dy = 0
+        dx = 0
+
+        if not self.loop_y and y >= self.FMY:
+            dy = y - (self.FMY - 1)
+            y = self.FMY - 1
+
+        if not self.loop_x and x >= self.FMX:
+            dx = x - (self.FMX - 1)
+            x = self.FMX - 1
+
+        compatible = 0
+        for t in range(self.table.T):
+            if self.wave[y][x][t]:
+                if self.table.patterns[t][dy][dx] == val:
+                    compatible += 1
+                else:
+                    self.ban(y, x, t)
+
+        if not compatible:
+            raise Exception(f"No compatible patterns for value '{val}' at {y, x}")
+
+        # self.collapse(y, x)
+        self.propagate()        
 
     def observe(self):
         self.observe_count += 1
@@ -127,17 +195,23 @@ class Field:
             return True
 
          # A minimum point has been found, so prep it for propogation...
+        self.collapse(argminy, argminx)
+        return None
+
+    def collapse(self, y, x):
         distribution = [0 for _ in range(0, self.table.T)]
         for t in range(0, self.table.T):
-            distribution[t] = self.table.weights[t] if self.wave[argminy][argminx][t] else 0
+            distribution[t] = self.table.weights[t] if self.wave[y][x][t] else 0
         r = StuffRandom(distribution, self.rng.random())
         for t in range(0, self.table.T):
-            if self.wave[argminy][argminx][t] != (t == r):
-                self.ban(argminy, argminx, t)
+            if self.wave[y][x][t] != (t == r):
+                self.ban(y, x, t)
 
-        self.observed[argminy][argminx] = r
+        self.observed[y][x] = r
         self.observe_count += 1
-        return None
+
+    def onBoundary(self, y, x):
+        return (not self.loop_x and (x >= self.FMX or x < 0)) or (not self.loop_y and (y >= self.FMY or y < 0))
 
     def propagate(self):
         while self.stack:
@@ -145,20 +219,20 @@ class Field:
 
             for i, (dy, dx) in enumerate(self.table.deltas):
                 y2 = y1 + dy
-                if y2 < 0 and self.loop_y:
-                    y2 += self.FMY
-                elif y2 >= self.FMY and self.loop_y:
-                    y2 -= self.FMY
-                else:
-                    pass
-
                 x2 = x1 + dx
-                if x2 < 0 and self.loop_x:
+
+                if self.onBoundary(y2, x2):
+                    continue
+
+                if y2 < 0:
+                    y2 += self.FMY
+                elif y2 >= self.FMY:
+                    y2 -= self.FMY
+                
+                if x2 < 0:
                     x2 += self.FMX
-                elif x2 >= self.FMX and self.loop_x:
-                    x2 -= self.FMX
-                else:
-                    pass
+                elif x2 >= self.FMX:
+                    x2 -= self.FMX                
 
                 p = self.table.propagator[i][t1]
 
@@ -218,9 +292,9 @@ def main(t, w=30, h=30, s=None):
     f = Field(t, w, h, seed=s)
     f.clear()
 
-    val = make_timer(f.step)()
+    val = f.step()
     while val == None:
-        print(draw(f))
+        # print(draw(f))
         val = make_timer(f.step)()
 
     print(draw(f))
