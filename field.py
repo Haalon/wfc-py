@@ -1,6 +1,5 @@
 import numpy as np
 from types import SimpleNamespace
-import random
 import math
 import time
 import collections
@@ -8,33 +7,8 @@ import collections
 from table import Table
 
 
-
-dung = """\
-#####.###....  .####
-     .#######  .    
-......##....  ......
-#####.##....  .  ###
-  .............. #  
-  .#####....   . #  
-  .############.##  
-......   ######.....
-#####.   .......####
-#####........  .####\
-"""
-
-dung_test = np.array([list(s) for s in dung.split('\n')])
-
-test=np.array([
-    ['X',' ',' ',' ',' ',' ','X',' '],
-    ['X','X','X','X','X','X','X',' '],
-    [' ',' ','X',' ',' ',' ','X',' '],
-    [' ',' ','X',' ',' ',' ','X',' '],
-    ['X','X','X',' ',' ',' ','X','X'],
-    [' ',' ','X',' ',' ',' ','X',' '],
-    ['X','X','X',' ',' ',' ','X',' ']])
-
 class Field:
-    def __init__(self, table, width, height, loop_x=True, loop_y=True, seed=None):
+    def __init__(self, table, height, width, loop_x=True, loop_y=True, seed=None):
         self.table = table
         self.loop_x = loop_x
         self.loop_y = loop_y
@@ -66,19 +40,18 @@ class Field:
         self.entropies = np.full((self.FMY, self.FMX), 0.)
 
         self.stack = []
-        self.stacksize = 0
 
         self.observe_count = 0
 
         # resulting matrix
         self.observed = np.full((self.FMY, self.FMX), -1)
         
-        self.rng = random.Random()
+        self.rng = np.random.RandomState()
 
         if seed != None:
             self.rng.seed(seed)
 
-        self.clear()
+        # self.clear()
 
     def clear(self):
         for y in range(self.FMY):
@@ -92,7 +65,7 @@ class Field:
                 self.sumsOfWeightLogWeights[y][x] = self.sumOfWeightLogWeights;
                 self.entropies[y][x] = self.startingEntropy;
 
-    def ban(self, y, x, t):
+    def _ban(self, y, x, t):
         self.wave[y][x][t] = False
 
         for d in range(4):
@@ -117,11 +90,113 @@ class Field:
         else:
             self.entropies[y][x] = -np.inf
 
-    def run(self):
-        val = f.step()
-        while val == None:
-            val = f.step()
-        return val
+    def _observe(self):
+        self.observe_count += 1
+        min_ = 1e+3
+        
+        argminx = -1
+        argminy = -1
+
+        for y in range(0, self.FMY):
+            for x in range(0, self.FMX):
+                amount = self.sumsOfOnes[y][x]
+                if amount == 0:
+                    return False  # contradiction
+
+                entropy = self.entropies[y][x]
+                if amount > 1 and entropy <= min_:
+                    noise = 1e-6 * self.rng.uniform()
+                    if entropy + noise < min_:
+                        min_ = entropy + noise
+                        argminy = y
+                        argminx = x
+
+        # no non-zero entropies - fully observed
+        if (-1 == argminx) and (-1 == argminy):
+            return True
+
+         # A minimum point has been found, so prep it for propogation...
+        self._collapse(argminy, argminx)
+        return None
+
+    def _collapse(self, y, x):
+        distribution = np.full(self.table.T, 0.)
+        for t in range(0, self.table.T):
+            distribution[t] = self.table.weights[t] if self.wave[y][x][t] else 0
+
+        a_sum = sum(distribution)        
+        distribution = distribution / a_sum
+        r = self.rng.choice(self.table.T, p=distribution)
+
+        for t in range(0, self.table.T):
+            if self.wave[y][x][t] != (t == r):
+                self._ban(y, x, t)
+
+        self.observed[y][x] = r
+        self.observe_count += 1
+
+    def _onBoundary(self, y, x):
+        return (not self.loop_x and (x >= self.FMX or x < 0)) or (not self.loop_y and (y >= self.FMY or y < 0))
+
+    def _propagate(self):
+        while self.stack:
+            y1, x1, t1 = self.stack.pop()
+
+            for i, (dy, dx) in enumerate(self.table.deltas):
+                y2 = y1 + dy
+                x2 = x1 + dx
+
+                if self._onBoundary(y2, x2):
+                    continue
+
+                if y2 < 0:
+                    y2 += self.FMY
+                elif y2 >= self.FMY:
+                    y2 -= self.FMY
+                
+                if x2 < 0:
+                    x2 += self.FMX
+                elif x2 >= self.FMX:
+                    x2 -= self.FMX                
+
+                p = self.table.propagator[i][t1]
+
+                for n in range(len(p)):
+                    t2 = p[n]
+                    self.compatible[y2][x2][t2][i] -= 1
+                    if self.compatible[y2][x2][t2][i] == 0:
+                        self._ban(y2, x2, t2)
+
+
+    def cut(self, oy=0, ox=0, ey=0, ex=0):
+        ey = ey or self.height
+        ex = ex or self.width
+
+        # keep loops only if cutting the whole axis
+        # otherwise collisions of the patterns on the new edges occur
+        loop_y = self.loop_y and oy == 0 and ey == self.height
+        loop_x = self.loop_x and ox == 0 and ex == self.width
+
+        new_field = Field(self.table, ey-oy, ex-ox, loop_x, loop_y)
+        new_field.rng.set_state(self.rng.get_state())
+
+        for dy in range(new_field.FMY):
+            for dx in range(new_field.FMX):
+                new_field.wave[dy][dx] = self.wave[oy+dy][ox+dx].copy()
+                new_field.compatible[dy][dx] = self.compatible[oy+dy][ox+dx].copy()
+
+                new_field.sumsOfOnes[dy][dx] = self.sumsOfOnes[oy+dy][ox+dx].copy()
+                new_field.sumsOfWeights[dy][dx] = self.sumsOfWeights[oy+dy][ox+dx].copy()
+                new_field.sumsOfWeightLogWeights[dy][dx] = self.sumsOfWeightLogWeights[oy+dy][ox+dx].copy()
+                new_field.entropies[dy][dx] = self.entropies[oy+dy][ox+dx].copy()
+
+                new_field.observed[dy][dx] = self.observed[oy+dy][ox+dx].copy()
+
+        for y,x,t in self.stack:
+            if y < new_field.FMY and x < new_field.FMX:
+                new_field.stack.append(y,x,t)
+
+        return new_field
 
     def setEdges(self, val):
         for x in range(self.width):
@@ -132,9 +207,6 @@ class Field:
         for y in range(1, self.height-1):
             self.observeValue(y, 0, val)
             self.observeValue(y, self.width-1, val)
-
-
-
 
     def observeValue(self, y, x, val):
         if not val in self.table.values_map:
@@ -160,152 +232,38 @@ class Field:
                 if self.table.patterns[t][dy][dx] == val:
                     compatible += 1
                 else:
-                    self.ban(y, x, t)
+                    self._ban(y, x, t)
 
         if not compatible:
             raise Exception(f"No compatible patterns for value '{val}' at {y, x}")
 
-        # self.collapse(y, x)
-        self.propagate()        
-
-    def observe(self):
-        self.observe_count += 1
-        min_ = 1e+3
-        
-        argminx = -1
-        argminy = -1
-
-
-        for y in range(0, self.FMY):
-            for x in range(0, self.FMX):
-                amount = self.sumsOfOnes[y][x]
-                if amount == 0:
-                    return False  # contradiction
-
-                entropy = self.entropies[y][x]
-                if amount > 1 and entropy <= min_:
-                    noise = 1e-6 * self.rng.random()
-                    if entropy + noise < min_:
-                        min_ = entropy + noise
-                        argminy = y
-                        argminx = x
-
-        # no non-zero entropies - fully observed
-        if (-1 == argminx) and (-1 == argminy):
-            return True
-
-         # A minimum point has been found, so prep it for propogation...
-        self.collapse(argminy, argminx)
-        return None
-
-    def collapse(self, y, x):
-        distribution = [0 for _ in range(0, self.table.T)]
-        for t in range(0, self.table.T):
-            distribution[t] = self.table.weights[t] if self.wave[y][x][t] else 0
-        r = StuffRandom(distribution, self.rng.random())
-        for t in range(0, self.table.T):
-            if self.wave[y][x][t] != (t == r):
-                self.ban(y, x, t)
-
-        self.observed[y][x] = r
-        self.observe_count += 1
-
-    def onBoundary(self, y, x):
-        return (not self.loop_x and (x >= self.FMX or x < 0)) or (not self.loop_y and (y >= self.FMY or y < 0))
-
-    def propagate(self):
-        while self.stack:
-            y1, x1, t1 = self.stack.pop()
-
-            for i, (dy, dx) in enumerate(self.table.deltas):
-                y2 = y1 + dy
-                x2 = x1 + dx
-
-                if self.onBoundary(y2, x2):
-                    continue
-
-                if y2 < 0:
-                    y2 += self.FMY
-                elif y2 >= self.FMY:
-                    y2 -= self.FMY
-                
-                if x2 < 0:
-                    x2 += self.FMX
-                elif x2 >= self.FMX:
-                    x2 -= self.FMX                
-
-                p = self.table.propagator[i][t1]
-
-                for n in range(len(p)):
-                    t2 = p[n]
-                    self.compatible[y2][x2][t2][i] -= 1
-                    if self.compatible[y2][x2][t2][i] == 0:
-                        self.ban(y2, x2, t2)
+        # self._collapse(y, x)
+        self._propagate()        
 
     def step(self):
-        res = self.observe()
+        res = self._observe()
         if res != None:
             return res
 
-        self.propagate()
+        self._propagate()
 
+    def run(self):
+        val = self.step()
+        while val == None:
+            val = self.step()
+        return val
 
-def draw(field, defval='@'):
-    res = np.full((field.height, field.width), defval)
-    for y in range(field.FMY):
-        for x in range(field.FMX):
-            if field.observed[y,x] >= 0:
-                for dy in range(field.table.N):
-                    for dx in range(field.table.N):
-                        y2, x2 = ((y+dy) % field.height, (x+dx) % field.width)
-                        ind = field.observed[y,x]
-                        res[y2,x2] = field.table.patterns[ind][dy,dx]
+    def result(self, defval=None):
+        defval = self.table.values_map.inverse[0] if defval == None else defval
+        res = np.full((self.height, self.width), defval)
 
-    text = ''
-    for y in range(field.height):
-        for x in range(field.width):
-            text+= str(res[y,x])
-        text+='\n'
+        for y in range(self.FMY):
+            for x in range(self.FMX):
+                if self.observed[y,x] >= 0:
+                    for dy in range(self.table.N):
+                        for dx in range(self.table.N):
+                            y2, x2 = ((y+dy) % self.height, (x+dx) % self.width)
+                            ind = self.observed[y,x]
+                            res[y2,x2] = self.table.patterns[ind][dy,dx]
 
-    return text[0:-1]
-
-
-def StuffRandom(source_array, random_value):
-    a_sum = sum(source_array)
-    
-    if 0 == a_sum:
-        for j in range(0, len(source_array)):
-            source_array[j] = 1
-        a_sum = sum(source_array)
-    for j in range(0, len(source_array)):
-        source_array[j] /= a_sum
-    i = 0
-    x = 0
-    while (i < len(source_array)):
-        x += source_array[i]
-        if random_value <= x:
-            return i
-        i += 1
-    return 0
-
-def main(t, w=30, h=30, s=None):
-    f = Field(t, w, h, seed=s)
-    f.clear()
-
-    val = f.step()
-    while val == None:
-        # print(draw(f))
-        val = make_timer(f.step)()
-
-    print(draw(f))
-    print(val)
-    return f
-
-import time
-def make_timer(func):
-    def _timer(*args, **kwargs):
-        t0 = time.time()
-        res = func(*args, **kwargs)
-        print(time.time() - t0)
         return res
-    return _timer
