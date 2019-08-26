@@ -34,6 +34,7 @@ class Table:
 
     # deltas used in propagator (dy, dx)
     deltas = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+    opposite = [2,3,0,1]
 
     def __init__(self, matrix, N_value = 3, loop_x = True, loop_y = True, symmetry_value = 8):
         self.N = N_value
@@ -80,16 +81,16 @@ class Table:
         self.T = len(self.weights)              
 
         self.patterns = np.full(self.T, None)
-        self.stationary = np.full(self.T, 0)
+        stationary = np.full(self.T, 0)
 
         counter = 0
         for key in ordering:
             self.patterns[counter] = self.key2Pattern(key)
-            self.stationary[counter] = self.weights[key]
+            stationary[counter] = self.weights[key]
             counter += 1
 
-
-        self.propagator = np.full( (4, self.T), None)
+        self.weights = stationary
+        self.propagator = np.full((4, self.T), None)
 
         for i, (dy, dx) in enumerate(self.deltas):                                
             for t in range(0, self.T):
