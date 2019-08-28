@@ -200,13 +200,18 @@ class Field:
 
     def setEdges(self, val):
         for x in range(self.width):
-            self.observeValue(0, x, val)
-            self.observeValue(self.height-1, x, val)
-
+            if(self.observeValue(0, x, val) and self.observeValue(self.height-1, x, val)):
+                pass
+            else
+                return False
 
         for y in range(1, self.height-1):
-            self.observeValue(y, 0, val)
-            self.observeValue(y, self.width-1, val)
+            if(self.observeValue(y, 0, val) and self.observeValue(y, self.width-1, val)):
+                pass
+            else:
+                return False
+
+        return True           
 
     def observeValue(self, y, x, val):
         if not val in self.table.values_map:
@@ -231,14 +236,18 @@ class Field:
             if self.wave[y][x][t]:
                 if self.table.patterns[t][dy][dx] == val:
                     compatible += 1
-                else:
-                    self._ban(y, x, t)
 
         if not compatible:
-            raise Exception(f"No compatible patterns for value '{val}' at {y, x}")
+            return False
+
+        for t in range(self.table.T):
+            if self.wave[y][x][t]:
+                if self.table.patterns[t][dy][dx] != val:
+                    self._ban(y,x,t)
 
         # self._collapse(y, x)
-        self._propagate()        
+        self._propagate()
+        return True      
 
     def step(self):
         res = self._observe()
