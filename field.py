@@ -8,10 +8,10 @@ from table import Table
 
 
 class Field:
-    def __init__(self, table, height, width, loop_x=True, loop_y=True, seed=None):
+    def __init__(self, table, height, width, loop_y=True, loop_x=True, seed=None):
         self.table = table
-        self.loop_x = loop_x
         self.loop_y = loop_y
+        self.loop_x = loop_x        
 
         self.width = width
         self.height = height
@@ -128,7 +128,7 @@ class Field:
         distribution = distribution / a_sum
         r = self.rng.choice(self.table.T, p=distribution)
 
-        for t in range(0, self.table.T):
+        for t in range(self.table.T):
             if self.wave[y][x][t] != (t == r):
                 self._ban(y, x, t)
 
@@ -138,34 +138,44 @@ class Field:
     def _onBoundary(self, y, x):
         return (not self.loop_x and (x >= self.FMX or x < 0)) or (not self.loop_y and (y >= self.FMY or y < 0))
 
+    def _wrap(self, y2, x2):
+        if y2 < 0:
+            y2 += self.FMY
+        elif y2 >= self.FMY:
+            y2 -= self.FMY
+                
+        if x2 < 0:
+            x2 += self.FMX
+        elif x2 >= self.FMX:
+            x2 -= self.FMX 
+
+        return (y2, x2) 
+
     def _propagate(self):
         while self.stack:
             y1, x1, t1 = self.stack.pop()
 
-            for i, (dy, dx) in enumerate(self.table.deltas):
-                y2 = y1 + dy
-                x2 = x1 + dx
+            for d in range(4):
+                self._propagate_local(y1, x1, t1, d)                
 
-                if self._onBoundary(y2, x2):
-                    continue
 
-                if y2 < 0:
-                    y2 += self.FMY
-                elif y2 >= self.FMY:
-                    y2 -= self.FMY
-                
-                if x2 < 0:
-                    x2 += self.FMX
-                elif x2 >= self.FMX:
-                    x2 -= self.FMX                
+    def _propagate_local(self, y1, x1, t1, d):
+        dy, dx = self.table.deltas[d]
+        y2 = y1 + dy
+        x2 = x1 + dx
 
-                p = self.table.propagator[i][t1]
+        if self._onBoundary(y2, x2):
+            return
 
-                for n in range(len(p)):
-                    t2 = p[n]
-                    self.compatible[y2][x2][t2][i] -= 1
-                    if self.compatible[y2][x2][t2][i] == 0:
-                        self._ban(y2, x2, t2)
+        y2, x2 = self._wrap(y2, x2)
+
+        p = self.table.propagator[d][t1]
+
+        for n in range(len(p)):
+            t2 = p[n]
+            self.compatible[y2][x2][t2][d] -= 1
+            if self.compatible[y2][x2][t2][d] == 0:
+                self._ban(y2, x2, t2)
 
 
     def cut(self, oy=0, ox=0, ey=0, ex=0):
@@ -177,7 +187,7 @@ class Field:
         loop_y = self.loop_y and oy == 0 and ey == self.height
         loop_x = self.loop_x and ox == 0 and ex == self.width
 
-        new_field = Field(self.table, ey-oy, ex-ox, loop_x, loop_y)
+        new_field = Field(self.table, ey-oy, ex-ox, loop_y, loop_x)
         new_field.rng.set_state(self.rng.get_state())
 
         for dy in range(new_field.FMY):
@@ -192,9 +202,85 @@ class Field:
 
                 new_field.observed[dy][dx] = self.observed[oy+dy][ox+dx].copy()
 
-        for y,x,t in self.stack:
-            if y < new_field.FMY and x < new_field.FMX:
-                new_field.stack.append(y,x,t)
+        return new_field
+
+
+    def extend2(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
+        if py < 0 or px < 0 or ny < 0 or nx < 0:
+            raise Exception("Indexes should be 0 or positive")
+
+        loop_y = loop_y if (ny != 0 or py != 0) else self.loop_y
+        loop_X = loop_x if (nx != 0 or px != 0) else self.loop_x
+
+        new_field = Field(self.table, self.height + py + ny, self.width + px + nx, loop_y, loop_x)
+        new_field.rng.set_state(self.rng.get_state())
+        new_field.clear()
+
+        for dy in range(self.FMY):
+            for dx in range(self.FMX):
+                y = dy + ny
+                x = dx + nx
+                for t in range(self.table.T):
+                    if not self.wave[dy][dx][t]:
+                        new_field._ban(y,x,t)
+
+        new_field._propagate()
+        return new_field
+
+    def extend(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
+        if py < 0 or px < 0 or ny < 0 or nx < 0:
+            raise Exception("Indexes should be 0 or positive")
+
+        loop_y = loop_y if (ny != 0 or py != 0) else self.loop_y
+        loop_X = loop_x if (nx != 0 or px != 0) else self.loop_x
+
+        new_field = Field(self.table, self.height + py + ny, self.width + px + nx, loop_y, loop_x)
+        new_field.rng.set_state(self.rng.get_state())
+        new_field.clear()
+
+        for dy in range(self.FMY):
+            for dx in range(self.FMX):
+                y = dy + ny
+                x = dx + nx
+
+                new_field.wave[y][x] = self.wave[dy][dx].copy()
+                new_field.compatible[y][x] = self.compatible[dy][dx].copy()
+
+                new_field.sumsOfOnes[y][x] = self.sumsOfOnes[dy][dx].copy()
+                new_field.sumsOfWeights[y][x] = self.sumsOfWeights[dy][dx].copy()
+                new_field.sumsOfWeightLogWeights[y][x] = self.sumsOfWeightLogWeights[dy][dx].copy()
+                new_field.entropies[y][x] = self.entropies[dy][dx].copy()
+
+                new_field.observed[y][x] = self.observed[dy][dx].copy()
+
+        d_py = self.table.deltas.index((1,0))
+        d_px = self.table.deltas.index((0,1))
+        d_ny = self.table.deltas.index((-1,0))
+        d_nx = self.table.deltas.index((0,-1))
+
+
+        for t in range(self.table.T):
+            if px > 0 or (loop_x and nx > 0 and px == 0):
+                for y in range(self.FMY):                    
+                    if not self.wave[y][self.FMX-1][t]:
+                        new_field._propagate_local(y + ny, self.FMX - 1 + nx, t, d_px)
+
+            if nx > 0 or (loop_x and px > 0 and nx == 0):
+                for y in range(self.FMY):
+                    if not self.wave[y][0][t]:
+                        new_field._propagate_local(y + ny, 0 + nx, t, d_nx)
+
+            if py > 0 or (loop_y and ny > 0 and py == 0):
+                for x in range(self.FMX):
+                    if not self.wave[self.FMY-1][x][t]:
+                        new_field._propagate_local(self.FMY - 1 + ny, x + nx, t, d_py)
+
+            if ny > 0 or (loop_y and py > 0 and ny == 0):
+                for x in range(self.FMX):
+                    if not self.wave[0][x][t]:
+                        new_field._propagate_local(0 + ny, x + nx, t, d_ny)
+
+        new_field._propagate()
 
         return new_field
 
@@ -202,7 +288,7 @@ class Field:
         for x in range(self.width):
             if(self.observeValue(0, x, val) and self.observeValue(self.height-1, x, val)):
                 pass
-            else
+            else:
                 return False
 
         for y in range(1, self.height-1):
@@ -211,7 +297,7 @@ class Field:
             else:
                 return False
 
-        return True           
+        return True       
 
     def observeValue(self, y, x, val):
         if not val in self.table.values_map:
