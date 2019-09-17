@@ -8,7 +8,7 @@ dung = """\
 .....+##****  .+....
 #####.##****  .  ###
   ......****..+. #  
-  .#####****   . #  
+  .#####****###. #  
   .############.##  
 ..+...   ######+....
 #####.   ****..+####
@@ -18,13 +18,13 @@ dung = """\
 dung_test = np.array([list(s) for s in dung.split('\n')])
 
 test=np.array([
-    ['X',' ',' ','X',' ',' ',' ','X',' ',' '],
-    ['X','X','X','X','X','X','X','X',' ',' '],
-    ['X',' ',' ','X',' ',' ',' ','X',' ',' '],
-    ['X',' ',' ','X',' ',' ',' ','X',' ',' '],
-    ['X','X','X','X',' ',' ',' ','X','X','X'],
-    [' ',' ',' ','X',' ',' ',' ','X',' ',' '],
-    ['X','X','X','X',' ',' ',' ','X','X','X']])
+    ['X',' ',' ','X',' ',' ',' ','X',' ',' ',' '],
+    ['X','X','X','X',' ',' ',' ','X',' ',' ',' '],
+    ['X',' ',' ','X',' ',' ',' ','X',' ',' ',' '],
+    ['X',' ',' ','X','X','X','X','X',' ',' ',' '],
+    ['X','X','X','X',' ',' ',' ','X','X','X','X'],
+    ['X',' ',' ','X','X','X','X','X',' ',' ',' '],
+    ['X','X','X','X',' ',' ',' ','X','X','X','X']])
 
 
 def make_timer(func):
@@ -69,8 +69,14 @@ def draw_res(matrix):
 
 t = Table(test)
 
-f1 = Field(t, 10, 120, loop_x=True, loop_y=False)
+f1 = Field(t, 10, 100, loop_x=True, loop_y=False)
 f1.clear()
+
+# res = f1.step()
+
+# while res == None:
+#     print(draw(f1))
+#     res = f1.step()
 
 while True:
 
@@ -78,9 +84,14 @@ while True:
     flag = f1.run()
     if flag:
         res = f1.result()
-        print(draw_res(res[:7,:]))
+        print(draw_res(res[:7,:]), sep='')
+        # print("\ntemp:\n", draw(temp), sep='')
+        # print("\nresult:\n", draw_res(res), sep='')
         f1 = f1.cut(oy=7).extend2(py=7, loop_y=False)
+        # print("\ncut:\n", draw(f1), sep='')
+        # input()
     else:
+        break
         f1 = temp.cut()
         f1.rng.seed()
         print(f1.rng.uniform())
