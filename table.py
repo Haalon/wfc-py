@@ -36,11 +36,11 @@ class Table:
     deltas = [(0, 1), (1, 0), (0, -1), (-1, 0)]
     opposite = [2,3,0,1]
 
-    def __init__(self, matrix, N_value = 3, loop_x = True, loop_y = True, symmetry_value = 8):
+    def __init__(self, matrix, N_value = 3, loop_x = True, loop_y = True, sym = 8):
         self.N = N_value
         self.loop_y = loop_x
         self.loop_y = loop_y
-        self.sym = symmetry_value        
+        self.sym = sym        
 
         # bi-directional map of values found in input matrix to positional indexes
         self.values_map = bidict()
@@ -77,7 +77,7 @@ class Table:
                     if not key in weights:
                         ordering.append(key)
                         patterns.append(ps[s])
-                    
+
                     weights[key] += 1
 
         # number of unique patterns
