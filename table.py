@@ -57,8 +57,9 @@ class Table:
         y_range = h if loop_y else h - N_value + 1
         x_range = w if loop_x else w - N_value + 1        
 
-        self.weights = collections.Counter()
+        weights = collections.Counter()
         ordering = []
+        patterns = []
 
         for y in range(y_range):
             for x in range(x_range):
@@ -73,23 +74,22 @@ class Table:
                 ps[7] = np.fliplr(ps[6])
                 for s in range(0, self.sym):
                     key = self.pattern2Key(ps[s])                   
-                    self.weights[key] += 1
-                    if not key in ordering:
+                    if not key in weights:
                         ordering.append(key)
+                        patterns.append(ps[s])
+                    
+                    weights[key] += 1
 
         # number of unique patterns
-        self.T = len(self.weights)              
+        self.T = len(patterns)              
 
         self.patterns = np.full(self.T, None)
-        stationary = np.full(self.T, 0)
+        self.weights = np.full(self.T, 0)
 
-        counter = 0
-        for key in ordering:
-            self.patterns[counter] = self.key2Pattern(key)
-            stationary[counter] = self.weights[key]
-            counter += 1
+        for t, key in enumerate(ordering):
+            self.patterns[t] = patterns[t]
+            self.weights[t] = weights[key]
 
-        self.weights = stationary
         self.propagator = np.full((4, self.T), None)
 
         for i, (dy, dx) in enumerate(self.deltas):                                
@@ -106,9 +106,3 @@ class Table:
     def pattern2Key(self, p):
         translated = np.array([self.values_map[val] for val in p.flatten()])
         return np.array2string(translated, separator=' ')[1:-1]
-
-    def key2Pattern(self, key):
-        raw = np.fromstring(key, sep = ' ')
-        return np.array([self.values_map.inverse[key] for key in raw]).reshape(self.N, self.N)
-
-
