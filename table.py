@@ -5,15 +5,6 @@ import time
 import collections
 from bidict import bidict
 
-test=np.array([
-    ['X',' ',' ',' ',' ','X',' '],
-    ['X','X','X','X','X','X',' '],
-    [' ',' ','X',' ',' ','X',' '],
-    [' ',' ','X',' ',' ','X',' '],
-    ['X','X','X',' ',' ','X','X'],
-    [' ',' ','X',' ',' ','X',' '],
-    ['X','X','X',' ',' ','X',' ']])
-
 def take2(matrix, y, x):
     return matrix.take(y, mode ='wrap', axis=0).take(x, mode ='wrap', axis=1)
 

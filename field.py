@@ -237,20 +237,22 @@ class Field:
         return new_field
 
 
-    def extend(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
-        """Creates extendend field by re-applying all bans from the original
+    def extend(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True, deep=False):
+        """Create extendend copy of the original field
 
         Args:
             py (int): Number of cells to extend in positive y direction (Bottom). Defaults to 0.
             px (int): Number of cells to extend in positive x direction (Right). Defaults to 0.
             ny (int): Number of cells to extend in negative y direction (Top). Defaults to 0.
             nx (int): Number of cells to extend in negative x direction (Left). Defaults to 0.
-            loop_y (bool): Looping flag for Y axis
-            loop_x (bool): Looping flag for X axis
+            loop_y (bool): Looping flag for Y axis. Defaults to True.
+            loop_x (bool): Looping flag for X axis. Defaults to True.
+            deep (bool): If false method will copy only fully observed cells to save time.
+                Does not matter when a field is fully observed, but to properly copy a partially oberved one, True should be set.
+                Defaults to False.
 
         Returns:
             Field: The new, extended field.
-
         """
         if py < 0 or px < 0 or ny < 0 or nx < 0:
             raise Exception("Indexes should be 0 or positive")
@@ -266,121 +268,16 @@ class Field:
             for dx in range(self.FMX):
                 y = dy + ny
                 x = dx + nx
-                for t in range(self.table.T):
-                    if not self.wave[dy][dx][t]:
-                        new_field._ban(y,x,t)
+                if deep:
+                    for t in range(self.table.T):
+                        if not self.wave[dy][dx][t]:
+                            new_field._ban(y,x,t)
+                else:
+                    if self.observed[dy][dx] > 0:
+                        new_field._set(y, x, self.observed[dy][dx])
 
         new_field.rng.set_state(self.rng.get_state())
         new_field._propagate()
-        return new_field
-
-    def extend_observed(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
-        """Creates extendend field by forced observation of patterns from the original one.
-        Keeps only fully observed states, discards everything else
-
-        Args:
-            py (int): Number of cells to extend in positive y direction (Bottom). Defaults to 0.
-            px (int): Number of cells to extend in positive x direction (Right). Defaults to 0.
-            ny (int): Number of cells to extend in negative y direction (Top). Defaults to 0.
-            nx (int): Number of cells to extend in negative x direction (Left). Defaults to 0.
-            loop_y (bool): Looping flag for Y axis
-            loop_x (bool): Looping flag for X axis
-
-        Returns:
-            Field: The new, extended field.
-
-        """
-        if py < 0 or px < 0 or ny < 0 or nx < 0:
-            raise Exception("Indexes should be 0 or positive")
-
-        # Do not allow to change looping unless extending that axis
-        loop_y = loop_y if (ny != 0 or py != 0) else self.loop_y
-        loop_X = loop_x if (nx != 0 or px != 0) else self.loop_x
-
-        new_field = Field(self.table, self.height + py + ny, self.width + px + nx, loop_y, loop_x)
-        new_field.clear()
-
-        for dy in range(self.FMY):
-            for dx in range(self.FMX):
-                y = dy + ny
-                x = dx + nx
-                if self.observed[dy][dx] > 0:
-                    new_field._set(y, x, self.observed[dy][dx])
-
-        new_field._propagate()
-        new_field.rng.set_state(self.rng.get_state())
-        return new_field
-
-    def extend_edgy(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
-        """Creates extendend field by propagating states to the new field only from the edges of the old field.
-        Probably a bad idea.
-
-        Args:
-            py (int): Number of cells to extend in positive y direction (Bottom). Defaults to 0.
-            px (int): Number of cells to extend in positive x direction (Right). Defaults to 0.
-            ny (int): Number of cells to extend in negative y direction (Top). Defaults to 0.
-            nx (int): Number of cells to extend in negative x direction (Left). Defaults to 0.
-            loop_y (bool): Looping flag for Y axis
-            loop_x (bool): Looping flag for X axis
-
-        Returns:
-            Field: The new, extended field.
-
-        """
-        if py < 0 or px < 0 or ny < 0 or nx < 0:
-            raise Exception("Indexes should be 0 or positive")
-
-        # Do not allow to change looping unless extending that axis
-        loop_y = loop_y if (ny != 0 or py != 0) else self.loop_y
-        loop_X = loop_x if (nx != 0 or px != 0) else self.loop_x
-
-        new_field = Field(self.table, self.height + py + ny, self.width + px + nx, loop_y, loop_x)
-        new_field.clear()
-
-        for dy in range(self.FMY):
-            for dx in range(self.FMX):
-                y = dy + ny
-                x = dx + nx
-
-                new_field.wave[y][x] = self.wave[dy][dx].copy()
-                new_field.compatible[y][x] = self.compatible[dy][dx].copy()
-
-                new_field.sumsOfOnes[y][x] = self.sumsOfOnes[dy][dx].copy()
-                new_field.sumsOfWeights[y][x] = self.sumsOfWeights[dy][dx].copy()
-                new_field.sumsOfWeightLogWeights[y][x] = self.sumsOfWeightLogWeights[dy][dx].copy()
-                new_field.entropies[y][x] = self.entropies[dy][dx].copy()
-
-                new_field.observed[y][x] = self.observed[dy][dx].copy()
-
-        d_py = self.table.deltas.index((1,0))
-        d_px = self.table.deltas.index((0,1))
-        d_ny = self.table.deltas.index((-1,0))
-        d_nx = self.table.deltas.index((0,-1))
-
-
-        for t in range(self.table.T):
-            if px > 0 or (loop_x and nx > 0 and px == 0):
-                for y in range(self.FMY):                    
-                    if not self.wave[y][self.FMX-1][t]:
-                        new_field._propagate_local(y + ny, self.FMX - 1 + nx, t, d_px)
-
-            if nx > 0 or (loop_x and px > 0 and nx == 0):
-                for y in range(self.FMY):
-                    if not self.wave[y][0][t]:
-                        new_field._propagate_local(y + ny, 0 + nx, t, d_nx)
-
-            if py > 0 or (loop_y and ny > 0 and py == 0):
-                for x in range(self.FMX):
-                    if not self.wave[self.FMY-1][x][t]:
-                        new_field._propagate_local(self.FMY - 1 + ny, x + nx, t, d_py)
-
-            if ny > 0 or (loop_y and py > 0 and ny == 0):
-                for x in range(self.FMX):
-                    if not self.wave[0][x][t]:
-                        new_field._propagate_local(0 + ny, x + nx, t, d_ny)
-
-        new_field._propagate()
-        new_field.rng.set_state(self.rng.get_state())
         return new_field
 
     def observePattern(self, y, x, pat):
@@ -449,6 +346,15 @@ class Field:
         return True  
 
     def setEdges(self, val):
+        """Try to forcefully observe given value on all of the edges of the field.
+
+        Args:
+            val (any): Value to be observed, must exist in the field's table. 
+
+        Returns:
+            bool: Success flag
+
+        """
         for x in range(self.width):
             if(self.observeValue(0, x, val) and self.observeValue(self.height-1, x, val)):
                 pass
@@ -464,6 +370,12 @@ class Field:
         return True           
 
     def step(self):
+        """Perform a single step of WFC algorythm.
+
+        Returns:
+            bool: Success flag
+
+        """
         res = self._observe()
         if res != None:
             return res
@@ -471,12 +383,29 @@ class Field:
         self._propagate()
 
     def run(self):
+        """Run WFC algorythm until it finishes or fails.
+
+        Returns:
+            bool: Success flag
+
+        """
+
         val = self.step()
         while val == None:
             val = self.step()
         return val
 
-    def result(self, defval=None):
+    def get_result(self, defval=None):
+        """Get current state
+
+        Args:
+            defval (any): Value to use for not fully observed states. 
+                Defaults to the fisrt value in the table.
+
+        Returns:
+            np.array: Csurrent state.
+
+        """
         defval = self.table.values_map.inverse[0] if defval == None else defval
         res = np.full((self.height, self.width), defval)
 
