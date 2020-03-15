@@ -9,6 +9,17 @@ from table import Table
 
 class Field:
     def __init__(self, table, height, width, loop_y=True, loop_x=True, seed=None):
+        """Initializes the field, if you plan to run this field, use Field.clear() next.
+
+        Args:
+            table (Table): Adjacency table.
+            height (int): Height of the resulting field.
+            width (int): Width of the resulting field
+            loop_y (bool): Looping flag for Y axis. Defaults to True.
+            loop_x (bool): Looping flag for X axis. Defaults to True.
+            seed (int): Seed for RNG. Uses time as a Default seed.
+
+        """
         self.table = table
         self.loop_y = loop_y
         self.loop_x = loop_x        
@@ -20,6 +31,12 @@ class Field:
         self.FMY = height if loop_y else height - table.N + 1
 
         self.wave = np.full((self.FMY, self.FMX, self.table.T), True)
+
+        # compatible[y][x][t][d] contains the number of patterns
+        # present in the wave that can be placed in the cell next to (y,x) in the
+        # opposite direction of d without being in contradiction with t
+        # placed in (y,x). If [y][x][t] is set to False, then
+        # compatible[y][x][t] has every element negative or null
         self.compatible = np.full((self.FMY, self.FMX, self.table.T, 4), 0)
 
         self.weightLogWeights = np.full(self.table.T, 0.)
@@ -40,8 +57,6 @@ class Field:
         self.entropies = np.full((self.FMY, self.FMX), 0.)
 
         self.stack = []
-
-        self.observe_count = 0
 
         # resulting matrix
         self.observed = np.full((self.FMY, self.FMX), -1)
@@ -65,33 +80,7 @@ class Field:
                 self.sumsOfWeightLogWeights[y][x] = self.sumOfWeightLogWeights;
                 self.entropies[y][x] = self.startingEntropy;
 
-    def _ban(self, y, x, t):
-        self.wave[y][x][t] = False
-
-        for d in range(4):
-            self.compatible[y][x][t][d] = 0
-
-        self.stack.append((y,x,t))
-
-        self.sumsOfOnes[y][x] -= 1
-        self.sumsOfWeights[y][x] -= self.table.weights[t]
-        self.sumsOfWeightLogWeights[y][x] -= self.weightLogWeights[t]
-
-        if self.sumsOfOnes[y][x] == 1:
-            for t2 in range(self.table.T):
-                if self.wave[y][x][t2]:
-                    self.observed[y][x] = t2
-                    self.observe_count += 1
-                    break
-
-        sum_ = self.sumsOfWeights[y][x]
-        if sum_ > 0:
-            self.entropies[y][x] = math.log(sum_) - self.sumsOfWeightLogWeights[y][x] / sum_
-        else:
-            self.entropies[y][x] = -np.inf
-
     def _observe(self):
-        self.observe_count += 1
         min_ = 1e+3
         
         argminx = -1
@@ -115,7 +104,7 @@ class Field:
         if (-1 == argminx) and (-1 == argminy):
             return True
 
-         # A minimum point has been found, so prep it for propogation...
+         # A minimum point has been found, so collapse it to a single state
         self._collapse(argminy, argminx)
         return None
 
@@ -128,28 +117,41 @@ class Field:
         distribution = distribution / a_sum
         r = self.rng.choice(self.table.T, p=distribution)
 
+        self._set(y, x, r)
+
+    def _set(self, y, x, r):
+        # ban all other possible states at this position
         for t in range(self.table.T):
             if self.wave[y][x][t] != (t == r):
                 self._ban(y, x, t)
 
         self.observed[y][x] = r
-        self.observe_count += 1
 
-    def _onBoundary(self, y, x):
-        return (not self.loop_x and (x >= self.FMX or x < 0)) or (not self.loop_y and (y >= self.FMY or y < 0))
+    def _ban(self, y, x, t):
+        self.wave[y][x][t] = False
 
-    def _wrap(self, y2, x2):
-        if y2 < 0:
-            y2 += self.FMY
-        elif y2 >= self.FMY:
-            y2 -= self.FMY
-                
-        if x2 < 0:
-            x2 += self.FMX
-        elif x2 >= self.FMX:
-            x2 -= self.FMX 
+        # set it to negative value, so it can't be reduced to zero anymore
+        # during propagation
+        for d in range(4):
+            self.compatible[y][x][t][d] = -1
 
-        return (y2, x2) 
+        self.stack.append((y,x,t))
+
+        self.sumsOfOnes[y][x] -= 1
+        self.sumsOfWeights[y][x] -= self.table.weights[t]
+        self.sumsOfWeightLogWeights[y][x] -= self.weightLogWeights[t]
+
+        if self.sumsOfOnes[y][x] == 1:
+            for t2 in range(self.table.T):
+                if self.wave[y][x][t2]:
+                    self.observed[y][x] = t2
+                    break
+
+        sum_ = self.sumsOfWeights[y][x]
+        if sum_ > 0:
+            self.entropies[y][x] = math.log(sum_) - self.sumsOfWeightLogWeights[y][x] / sum_
+        else:
+            self.entropies[y][x] = -np.inf
 
     def _propagate(self):
         while self.stack:
@@ -177,8 +179,38 @@ class Field:
             if self.compatible[y2][x2][t2][d] == 0:
                 self._ban(y2, x2, t2)
 
+    def _onBoundary(self, y, x):
+        return (not self.loop_x and (x >= self.FMX or x < 0)) or (not self.loop_y and (y >= self.FMY or y < 0))
 
-    def cut(self, oy=0, ox=0, ey=0, ex=0):
+    def _wrap(self, y2, x2):
+        if y2 < 0:
+            y2 += self.FMY
+        elif y2 >= self.FMY:
+            y2 -= self.FMY
+                
+        if x2 < 0:
+            x2 += self.FMX
+        elif x2 >= self.FMX:
+            x2 -= self.FMX 
+
+        return (y2, x2) 
+
+    def cut(self, oy=0, ox=0, ey=None, ex=None):
+        """Cuts rectangle from the original field, keeping its state.
+        Field.cut() can be used to make a field copy.
+        Field cannot be cut into rectangle with dimesions smaller than pattern's dimensions.
+
+        Args:
+            oy (int): Cut rectangle top-left corner's x coordinate. Defaults to 0.
+            ox (int): Cut rectangle top-left corner's y coordinate. Defaults to 0.
+            ey (int): Cut rectangle bottom-rigth corner's x coordinate. Defaults to field height.
+            ex (int): Cut rectangle bottom-rigth corner's x coordinate. Defaults to field width.
+
+        Returns:
+            Field: The new, cut field.
+
+        """
+
         ey = ey or self.height
         ex = ex or self.width
 
@@ -205,15 +237,29 @@ class Field:
         return new_field
 
 
-    def extend2(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
+    def extend(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
+        """Creates extendend field by re-applying all bans from the original
+
+        Args:
+            py (int): Number of cells to extend in positive y direction (Bottom). Defaults to 0.
+            px (int): Number of cells to extend in positive x direction (Right). Defaults to 0.
+            ny (int): Number of cells to extend in negative y direction (Top). Defaults to 0.
+            nx (int): Number of cells to extend in negative x direction (Left). Defaults to 0.
+            loop_y (bool): Looping flag for Y axis
+            loop_x (bool): Looping flag for X axis
+
+        Returns:
+            Field: The new, extended field.
+
+        """
         if py < 0 or px < 0 or ny < 0 or nx < 0:
             raise Exception("Indexes should be 0 or positive")
 
+        # Do not allow to change looping unless extending that axis
         loop_y = loop_y if (ny != 0 or py != 0) else self.loop_y
         loop_X = loop_x if (nx != 0 or px != 0) else self.loop_x
 
         new_field = Field(self.table, self.height + py + ny, self.width + px + nx, loop_y, loop_x)
-        new_field.rng.set_state(self.rng.get_state())
         new_field.clear()
 
         for dy in range(self.FMY):
@@ -224,18 +270,71 @@ class Field:
                     if not self.wave[dy][dx][t]:
                         new_field._ban(y,x,t)
 
+        new_field.rng.set_state(self.rng.get_state())
         new_field._propagate()
         return new_field
 
-    def extend(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
+    def extend_observed(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
+        """Creates extendend field by forced observation of patterns from the original one.
+        Keeps only fully observed states, discards everything else
+
+        Args:
+            py (int): Number of cells to extend in positive y direction (Bottom). Defaults to 0.
+            px (int): Number of cells to extend in positive x direction (Right). Defaults to 0.
+            ny (int): Number of cells to extend in negative y direction (Top). Defaults to 0.
+            nx (int): Number of cells to extend in negative x direction (Left). Defaults to 0.
+            loop_y (bool): Looping flag for Y axis
+            loop_x (bool): Looping flag for X axis
+
+        Returns:
+            Field: The new, extended field.
+
+        """
         if py < 0 or px < 0 or ny < 0 or nx < 0:
             raise Exception("Indexes should be 0 or positive")
 
+        # Do not allow to change looping unless extending that axis
         loop_y = loop_y if (ny != 0 or py != 0) else self.loop_y
         loop_X = loop_x if (nx != 0 or px != 0) else self.loop_x
 
         new_field = Field(self.table, self.height + py + ny, self.width + px + nx, loop_y, loop_x)
+        new_field.clear()
+
+        for dy in range(self.FMY):
+            for dx in range(self.FMX):
+                y = dy + ny
+                x = dx + nx
+                if self.observed[dy][dx] > 0:
+                    new_field._set(y, x, self.observed[dy][dx])
+
+        new_field._propagate()
         new_field.rng.set_state(self.rng.get_state())
+        return new_field
+
+    def extend_edgy(self, py=0, px=0, ny=0, nx=0, loop_y=True, loop_x=True):
+        """Creates extendend field by propagating states to the new field only from the edges of the old field.
+        Probably a bad idea.
+
+        Args:
+            py (int): Number of cells to extend in positive y direction (Bottom). Defaults to 0.
+            px (int): Number of cells to extend in positive x direction (Right). Defaults to 0.
+            ny (int): Number of cells to extend in negative y direction (Top). Defaults to 0.
+            nx (int): Number of cells to extend in negative x direction (Left). Defaults to 0.
+            loop_y (bool): Looping flag for Y axis
+            loop_x (bool): Looping flag for X axis
+
+        Returns:
+            Field: The new, extended field.
+
+        """
+        if py < 0 or px < 0 or ny < 0 or nx < 0:
+            raise Exception("Indexes should be 0 or positive")
+
+        # Do not allow to change looping unless extending that axis
+        loop_y = loop_y if (ny != 0 or py != 0) else self.loop_y
+        loop_X = loop_x if (nx != 0 or px != 0) else self.loop_x
+
+        new_field = Field(self.table, self.height + py + ny, self.width + px + nx, loop_y, loop_x)
         new_field.clear()
 
         for dy in range(self.FMY):
@@ -281,27 +380,41 @@ class Field:
                         new_field._propagate_local(0 + ny, x + nx, t, d_ny)
 
         new_field._propagate()
-
+        new_field.rng.set_state(self.rng.get_state())
         return new_field
 
-    def setEdges(self, val):
-        for x in range(self.width):
-            if(self.observeValue(0, x, val) and self.observeValue(self.height-1, x, val)):
-                pass
-            else:
-                return False
+    def observePattern(self, y, x, pat):
+        """Try to forcefully observe pattern t at (y,x) coordinates of this field,
 
-        for y in range(1, self.height-1):
-            if(self.observeValue(y, 0, val) and self.observeValue(y, self.width-1, val)):
-                pass
-            else:
-                return False
+        Args:
+            y (int): y coodrinate
+            x (int): x coodinate
+            pat (int): Index of the pattern in the table.
 
-        return True       
+        Returns:
+            bool: Success flag
+
+        """
+        if self.wave[y][x][pat]:
+            self._set(y, x, pat)
+            return True
+        return False
 
     def observeValue(self, y, x, val):
+        """Try to forcefully observe value 'val' at (y,x) coordinates of this field,
+        by banning all patterns that contradict this value.
+
+        Args:
+            y (int): y coodrinate
+            x (int): x coodinate
+            val (any): Value to be observed, must exist in the field's table. 
+
+        Returns:
+            bool: Success flag
+
+        """
         if not val in self.table.values_map:
-            raise Exception(f"Value {val} not found")
+            raise Exception(f"Value {val} not found in table")
 
         if y >= self.height or x >= self.width or y < 0 or x < 0:
             raise Exception(f"Coordinates {y, x} are out of bounds")
@@ -333,7 +446,22 @@ class Field:
 
         # self._collapse(y, x)
         self._propagate()
-        return True      
+        return True  
+
+    def setEdges(self, val):
+        for x in range(self.width):
+            if(self.observeValue(0, x, val) and self.observeValue(self.height-1, x, val)):
+                pass
+            else:
+                return False
+
+        for y in range(1, self.height-1):
+            if(self.observeValue(y, 0, val) and self.observeValue(y, self.width-1, val)):
+                pass
+            else:
+                return False
+
+        return True           
 
     def step(self):
         res = self._observe()
